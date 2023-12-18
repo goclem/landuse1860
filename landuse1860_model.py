@@ -36,7 +36,7 @@ def decoder_block(input, skip, filters:int, dropout:float, training:bool, name:s
     return x
 
 # Decoder block
-def unet_model(input_shape:dict, n_outputs:int, filters:int, output_activation:str, dropout:float, montecarlo:bool):
+def unet_model(input_shape:dict, n_outputs:int, filters:int, output_activation:str, dropout:float, montecarlo:bool, label:str):
     # Input
     inputs = layers.Input(input_shape, name='input')
     # Encoder path
@@ -54,6 +54,5 @@ def unet_model(input_shape:dict, n_outputs:int, filters:int, output_activation:s
     # Output
     outputs = layers.Conv2D(filters=n_outputs, kernel_size=(1, 1), padding='same', activation=output_activation, name='output')(d4)
     # Model
-    timestamp = datetime.now().strftime('%y%m%d_%H%M%S')
-    model = models.Model(inputs=inputs, outputs=outputs, name=f"unet_{timestamp}")
+    model = models.Model(inputs=inputs, outputs=outputs, name=f"unet{filters}_{label}")
     return model

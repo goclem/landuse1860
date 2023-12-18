@@ -25,7 +25,7 @@ print('GPU Available:', bool(len(tensorflow.config.experimental.list_physical_de
 
 #%% PREDICTS PROBABILITIES
 
-def predict_probas(srcfile:str, n_outputs:int=8) -> np.ndarray:
+def predict_probas(srcfile:str, n_outputs:int=9) -> np.ndarray:
     '''Computes moving window predictions for a map'''
     original = read_raster(srcfile) / 255
     shifted  = np.pad(original, ((128, 128), (128, 128), (0, 0)), mode='constant', constant_values=1)
@@ -42,14 +42,15 @@ def predict_probas(srcfile:str, n_outputs:int=8) -> np.ndarray:
     return probas
 
 # Loads model
-model = search_data(paths['models'], pattern='\.h5$')
+model = search_data(paths['models'], pattern='final\.h5$')
 model = model[np.argmax([os.stat(file).st_birthtime for file in model])]
 model = models.load_model(model)
 
 # Paths
 srcfiles = search_data(f"{paths['images']}", pattern='tif$')
-dstfiles = np.array([f"{paths['predictions']}/proba_{mapid(srcfile)}.tif" for srcfile in srcfiles])
+dstfiles = np.array([f"{paths['predictions']}/predict_{mapid(srcfile)}.tif" for srcfile in srcfiles])
 subset   = ~np.vectorize(path.exists)(dstfiles)
+subset   = np.char.find(srcfiles, '0880_6260') >= 0 # Testing
 
 # Computes probabilities
 for i, (srcfile, dstfile) in enumerate(zip(srcfiles[subset], dstfiles[subset])):

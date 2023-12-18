@@ -21,6 +21,9 @@ import os
 from landuse1860_utilities import *
 from skimage import color, exposure
 
+# Utilities
+classes = dict(zip(['undefined', 'buildings', 'transports', 'crops', 'meadows', 'pastures', 'specialised', 'forests', 'water'], np.arange(9)))
+
 #%% COMPUTES LABELS
 
 def compute_label(srcfile:str, dstfile:str) -> None:
@@ -39,6 +42,7 @@ def compute_label(srcfile:str, dstfile:str) -> None:
 
 # Loads tiles and classes
 classes = pd.read_csv(f"{paths['utilities']}/cartoem_classes.csv", usecols=['cartoem_id', 'y', 'label'])
+classes = classes.sort_values(by=['y', 'cartoem_id'])
 
 # Loads landuse vectors
 landuse = gpd.read_file(f"{paths['vectors']}/cartoem/ocs_ancien_sans_bati.gpkg")[['THEME', 'geometry']]
@@ -70,6 +74,17 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
     executor.map(compute_label, srcfiles, dstfiles)
 
 del classes, landuse, river, transport, building, tiles, srcfiles, dstfiles
+
+# Removes empty rasters
+srcfiles = search_data(paths['labels'], 'label_.*.tif')
+
+for srcfile in srcfiles:
+    print(f'Processing: {filename(srcfile)}')
+    label = read_raster(srcfile)
+    if np.count_nonzero(label) / np.prod(label.shape) < 0.1 :
+        os.remove(srcfile)
+
+del srcfiles, srcfile, label
 
 #%% COMPUTES MASKS
 
