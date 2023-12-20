@@ -50,7 +50,7 @@ model = models.load_model(model)
 srcfiles = search_data(f"{paths['images']}", pattern='tif$')
 dstfiles = np.array([f"{paths['predictions']}/predict_{mapid(srcfile)}.tif" for srcfile in srcfiles])
 subset   = ~np.vectorize(path.exists)(dstfiles)
-subset   = np.char.find(srcfiles, '0880_6260') >= 0 # Testing
+subset   = np.char.find(srcfiles, '0800_6500') >= 0 # Testing
 
 # Computes probabilities
 for i, (srcfile, dstfile) in enumerate(zip(srcfiles[subset], dstfiles[subset])):
