@@ -42,7 +42,7 @@ def predict_probas(srcfile:str, n_outputs:int=9) -> np.ndarray:
     return probas
 
 # Loads model
-model = search_data(paths['models'], pattern='final\.h5$')
+model = search_data(paths['models'], pattern='64_base\.h5$')
 model = model[np.argmax([os.stat(file).st_birthtime for file in model])]
 model = models.load_model(model)
 
@@ -50,7 +50,7 @@ model = models.load_model(model)
 srcfiles = search_data(f"{paths['images']}", pattern='tif$')
 dstfiles = np.array([f"{paths['predictions']}/predict_{mapid(srcfile)}.tif" for srcfile in srcfiles])
 subset   = ~np.vectorize(path.exists)(dstfiles)
-subset   = np.char.find(srcfiles, '0800_6500') >= 0 # Testing
+subset   = np.char.find(srcfiles, '0560_6300') >= 0 # Testing
 
 # Computes probabilities
 for i, (srcfile, dstfile) in enumerate(zip(srcfiles[subset], dstfiles[subset])):

@@ -8,15 +8,15 @@
 '''
 
 # Modules
-from tensorflow.keras import callbacks, layers, models, utils
+from tensorflow.keras import callbacks, layers, initializers, models, utils
 from datetime import datetime
 
 # Convolution block
 def convolution_block(input, filters:int, dropout:float, training:bool, name:str):
-    x = layers.Conv2D(filters=filters, kernel_size=(3, 3), padding='same', use_bias=False, name=f'{name}_convolution1')(input)
+    x = layers.Conv2D(filters=filters, kernel_size=(3, 3), padding='same', use_bias=False, kernel_initializer='he_normal', name=f'{name}_convolution1')(input)
     x = layers.Activation(activation='relu', name=f'{name}_activation1')(x)
     x = layers.BatchNormalization(name=f'{name}_normalisation1')(x)
-    x = layers.Conv2D(filters=filters, kernel_size=(3, 3), padding='same', use_bias=False, name=f'{name}_convolution2')(x)
+    x = layers.Conv2D(filters=filters, kernel_size=(3, 3), padding='same', use_bias=False, kernel_initializer='he_normal', name=f'{name}_convolution2')(x)
     x = layers.Activation(activation='relu', name=f'{name}_activation2')(x)
     x = layers.BatchNormalization(name=f'{name}_normalisation2')(x)
     x = layers.SpatialDropout2D(rate=dropout, name=f'{name}_dropout')(x, training=training)
@@ -30,13 +30,13 @@ def encoder_block(input, filters:int, dropout:float, training:bool, name:str):
 
 # Decoder block
 def decoder_block(input, skip, filters:int, dropout:float, training:bool, name:str):
-    x = layers.Conv2DTranspose(filters=filters, kernel_size=(2, 2), strides=(2, 2), padding='same', name=f'{name}_transpose')(input)
+    x = layers.Conv2DTranspose(filters=filters, kernel_size=(2, 2), strides=(2, 2), padding='same', kernel_initializer='he_normal', name=f'{name}_transpose')(input)
     x = layers.Concatenate(name=f'{name}_concatenate')([x, skip])
     x = convolution_block(input=x, filters=filters, dropout=dropout, training=training, name=name)
     return x
 
 # Decoder block
-def unet_model(input_shape:dict, n_outputs:int, filters:int, output_activation:str, dropout:float, montecarlo:bool, label:str):
+def unet_model(input_shape:dict, n_outputs:int, filters:int, output_activation:str, dropout:float, montecarlo:bool, label:str, seed:int=0):
     # Input
     inputs = layers.Input(input_shape, name='input')
     # Encoder path

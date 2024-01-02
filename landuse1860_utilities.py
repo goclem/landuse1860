@@ -32,6 +32,7 @@ paths = dict(
     images='../data_scem/images',
     labels='../data_scem/labels',
     masks='../data_scem/masks',
+    segments='../data_scem/segments',
     predictions='../data_scem/predictions',
     models='../data_scem/models',
     vectors='../data_scem/vectors',
@@ -248,15 +249,16 @@ def compare(images:list, titles:list=[''], cmaps:list=['gray'], path:str=None) -
     else:
         pyplot.show()
 
-def display_grid(images:list, gridsize:tuple, figsize:tuple=(15, 15), title:str=None, cmap:str='gray', path:str=None, dpi:int=300) -> None:
+def display_grid(images:list, titles:list, gridsize:tuple, figsize:tuple=(15, 15), suptitle:str=None, cmap:str='gray', path:str=None, dpi:int=300) -> None:
     '''Displays multiple images'''
     fig, axs = pyplot.subplots(nrows=gridsize[0], ncols=gridsize[1], figsize=figsize)
-    for ax, image in zip(axs.ravel(), images):
+    for ax, image, title in zip(axs.ravel(), images, titles):
         ax.imshow(image, cmap=cmap)
+        ax.set_title(title, fontsize=15)
         ax.set_axis_off()
         pyplot.tight_layout(pad=2)
-    if title is not None:
-        fig.suptitle(title, y=1.05, fontsize=30)
+    if suptitle is not None:
+        fig.suptitle(suptitle, y=1.05, fontsize=30)
     if path is not None:
         pyplot.savefig(path, dpi=dpi)
     else:

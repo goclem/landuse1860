@@ -21,7 +21,7 @@ from landuse1860_utilities import *
 from tensorflow.keras import backend, callbacks, layers, losses, metrics, models, optimizers, utils
 
 # Utilities
-classes = dict(zip(['undefined', 'buildings', 'transports', 'crops', 'meadows', 'pastures', 'specialised', 'forests', 'water'], np.arange(9)))
+classes = dict(zip(['undefined', 'buildings', 'transports', 'crops', 'meadows', 'pastures', 'specialised', 'forests', 'water', 'border'], np.arange(10)))
 print('GPU Available:', bool(len(tensorflow.config.experimental.list_physical_devices('GPU'))))
 
 #%% INITIALISES GENERATOR
@@ -29,14 +29,14 @@ print('GPU Available:', bool(len(tensorflow.config.experimental.list_physical_de
 class data_generator(utils.Sequence):
     
     def __init__(self, image_files:list, label_files:list, n_files:str, batch_size:int, target_class:int=None) -> tuple:
-        self.image_files  = image_files
-        self.label_files  = label_files
-        self.n_files      = n_files
-        self.batch_size   = batch_size
-        self.n_outputs    = 9
-        self.block_size   = (256, 256)
-        self.target_class = target_class
-        self.indices      = random.permutation(np.arange(len(self.label_files)))
+        self.image_files   = image_files
+        self.label_files   = label_files
+        self.n_files       = n_files
+        self.batch_size    = batch_size
+        self.n_outputs     = 10
+        self.block_size    = (256, 256)
+        self.target_class  = target_class
+        self.indices       = random.permutation(np.arange(len(self.label_files)))
     
     def __len__(self):
         return len(self.label_files) // self.n_files
@@ -46,14 +46,14 @@ class data_generator(utils.Sequence):
         file_indices = self.indices[file_index * self.n_files:(file_index + 1) * self.n_files]
         # print(f"Loading: {', '.join(mapids(self.label_files[file_indices]))}")
         # Loads images and labels
-        batch_labels = np.array([read_raster(file, dtype=int) for file in self.label_files[file_indices]])
-        batch_labels = images_to_blocks(batch_labels, block_size=self.block_size, mode='constant', constant_values=0)
-        batch_images = np.array([read_raster(file, dtype=int) for file in self.image_files[file_indices]])
-        batch_images = images_to_blocks(batch_images, block_size=self.block_size, mode='constant', constant_values=255)
+        batch_labels   = np.array([read_raster(file, dtype=int) for file in self.label_files[file_indices]])
+        batch_labels   = images_to_blocks(batch_labels, block_size=self.block_size, mode='constant', constant_values=0)
+        batch_images   = np.array([read_raster(file, dtype=int) for file in self.image_files[file_indices]])
+        batch_images   = images_to_blocks(batch_images, block_size=self.block_size, mode='constant', constant_values=255)
         # Keeps blocks >50% filled
-        keep_indices = np.sum(batch_labels!=0, axis=(1,2,3)) / np.prod(self.block_size) >= 0.5
-        batch_labels = batch_labels[keep_indices]
-        batch_images = batch_images[keep_indices]
+        keep_indices   = np.sum(batch_labels!=0, axis=(1,2,3)) / np.prod(self.block_size) >= 0.5
+        batch_labels   = batch_labels[keep_indices]
+        batch_images   = batch_images[keep_indices]
         # Formats images
         batch_images = np.where(batch_labels==0, 255, batch_images)
         batch_images = batch_images / 255
@@ -79,14 +79,14 @@ training = [filename(file).replace('label_', '') for file in search_data(paths['
 training = f"({'|'.join(training)})\.tif$"
 
 # Loads images and labels
-image_files = search_data(paths['images'], pattern=training)
-label_files = search_data(paths['labels'], pattern=training)
+image_files   = search_data(paths['images'],   pattern=training)
+label_files   = search_data(paths['labels'],   pattern=training)
 assert np.array_equal(mapids(image_files), mapids(label_files))
 
 # Splits samples
 samples = dict(train=0.70, valid=0.15, test=0.15)
-images_train, images_valid, images_test = sample_split(image_files, sizes=samples, seed=0)
-labels_train, labels_valid, labels_test = sample_split(label_files, sizes=samples, seed=0)
+images_train, images_valid, images_test = sample_split(image_files,   sizes=samples, seed=0)
+labels_train, labels_valid, labels_test = sample_split(label_files,   sizes=samples, seed=0)
 del image_files, label_files
 
 #%% ESTIMATES BASE MODELS
@@ -104,19 +104,31 @@ del batch_images, batch_labels, i
 '''
 
 # Initialises model
-model = unet_model(input_shape=(256, 256, 3), n_outputs=len(classes), filters=16, output_activation='softmax', dropout=0.1, montecarlo=True, label='base')
+model = unet_model(input_shape=(256, 256, 3), n_outputs=len(classes), filters=32, output_activation='softmax', dropout=0.1, montecarlo=True, label='base')
 model.summary()
 
-# Transfers latest base model parameters
-params = search_data(paths['models'], pattern='base\.h5$')
+''' Transfers latest base model parameters
+params = search_data(paths['models'], pattern=f'{model.name}.h5$')
 params = params[np.argmax([os.stat(file).st_birthtime for file in params])]
-params = models.load_model(params).get_weights()
-model.set_weights(params)
+params = models.load_model(params)
+model.set_weights(params.get_weights())
 del params
+'''
+
+# Computes class weights
+alphas = np.zeros((len(classes),), dtype=int)
+for label in train_generator.label_files:
+    freqs = read_raster(label, dtype=int)
+    freqs = np.bincount(freqs.flatten(), minlength=len(classes))
+    alphas += freqs
+alphas = np.sqrt(alphas)**-1
+alphas = alphas / np.sum(alphas)
+del freqs, label
+# print(dict(zip(classes.keys(), (alphas * alphas.min()**-1).round(2))))
 
 # Compiles models
 model.compile(optimizer=optimizers.legacy.Adam(learning_rate=0.0005, beta_1=0.9, beta_2=0.999), 
-              loss=losses.CategoricalFocalCrossentropy(alpha=0.25, gamma=2.0, from_logits=False), 
+              loss=losses.CategoricalFocalCrossentropy(alpha=alphas, gamma=2.0, from_logits=False), 
               metrics=[metrics.CategoricalAccuracy()])
 
 # Optimises model
@@ -126,31 +138,32 @@ training = model.fit(
     steps_per_epoch =len(train_generator.label_files) // train_generator.n_files,
     validation_steps=len(valid_generator.label_files) // valid_generator.n_files,
     epochs=100,
-    callbacks=callbacks.EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True),
+    callbacks=callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True),
     verbose=1
 )
 
 # Saves model and training history
-models.save_model(model, f"{paths['models']}/{model.name}_base.h5")
+models.save_model(model, f"{paths['models']}/{model.name}.h5")
 
 #%% ESTIMATES SPECIFIC MODELS
 
 # Defines target class
-for target in ['buildings', 'transports', 'crops', 'meadows', 'pastures', 'forests', 'water', 'specialised']:
+# 'buildings', 'transports', 'crops', 'meadows', 'pastures', 'forests', 'water'
+for target in ['specialised']:
     
     print(f'Processing: {target}')
     
     # Initialises generator
-    train_generator = data_generator(images_train, labels_train, n_files=4, batch_size=64,  target_class=classes[target])
-    valid_generator = data_generator(images_valid, labels_valid, n_files=4, batch_size=256, target_class=classes[target])
-    test_generator  = data_generator(images_test,  labels_test,  n_files=4, batch_size=256, target_class=classes[target])
+    train_generator = data_generator(images_train, labels_train, n_files=10, batch_size=64,  target_class=classes[target])
+    valid_generator = data_generator(images_valid, labels_valid, n_files=10, batch_size=256, target_class=classes[target])
+    test_generator  = data_generator(images_test,  labels_test,  n_files=10, batch_size=256, target_class=classes[target])
     
     # Initialises model
-    model = unet_model(input_shape=(256, 256, 3), n_outputs=1, filters=16, output_activation='sigmoid', dropout=0.1, montecarlo=True, label=target)
+    model = unet_model(input_shape=(256, 256, 3), n_outputs=1, filters=32, output_activation='sigmoid', dropout=0.1, montecarlo=True, label=target)
     # model.summary()
 
     # Transfers model parameters...
-    params = search_data(paths['models'], pattern=f'(base|{target})\.h5$')
+    params = search_data(paths['models'], pattern=f'(unet32_base|{model.name})\.h5$')
     index  = np.char.find(params, target) != -1
     if np.any(index): params = params[index]
     params = params[np.argmax([os.stat(file).st_birthtime for file in params])]
@@ -190,20 +203,34 @@ for target in ['buildings', 'transports', 'crops', 'meadows', 'pastures', 'fores
 
 #%% FINAL MODEL
 
-def final_model(input_shape:dict, n_outputs:int):
-    # Loads models
+def init_model_probas(input_shape:dict):
     target_models = list(classes.keys())[1:]
     target_models = [models.load_model(search_data(paths['models'], pattern=f'{target}.h5$')[0]) for target in target_models]
-    for model in target_models:
-        model.trainable = False
-    # Combines models
     inputs  = layers.Input(input_shape, name='input')
     probas  = [model(inputs) for model in target_models]
-    probas  = layers.concatenate([inputs] + probas, axis=3, name='concatenate')
-    probas  = layers.Conv2D(filters=64, kernel_size=(3, 3), padding='same', activation='relu', name='transform')(probas)
-    outputs = layers.Conv2D(filters=n_outputs, kernel_size=(1, 1), padding='same', activation='softmax', name='output')(probas)
-    model   = models.Model(inputs=inputs, outputs=outputs, name='model_final')
+    outputs = layers.concatenate(probas, axis=3, name='concatenate')
+    model   = models.Model(inputs=inputs, outputs=outputs, name='model32_probas')
     return model
+
+def model_final(input_shape:dict, n_outputs:int):
+    model_probas = init_model_probas(input_shape)
+    model_probas.trainable = False
+    inputs  = layers.Input(input_shape, name='input')
+    probas  = model_probas(inputs)
+    probas  = layers.Conv2D(filters=32, kernel_size=(3, 3), padding='same', activation='relu', name='conv1')(probas)
+    probas  = layers.Conv2D(filters=32, kernel_size=(3, 3), padding='same', activation='relu', name='conv2')(probas)
+    probas  = layers.Conv2D(filters=32, kernel_size=(3, 3), padding='same', activation='relu', name='conv3')(probas)
+    outputs = layers.Conv2D(filters=n_outputs, kernel_size=(1, 1), padding='same', activation='softmax', name='output')(probas)
+    model   = models.Model(inputs=inputs, outputs=outputs, name='model32_final')
+    return model
+
+''' Checks probability model
+model = init_model_probas(input_shape=(256, 256, 3))
+preds = model.predict(train_generator.__getitem__(0)[0])
+for i in random.choice(range(len(preds)), 5, replace=False):
+    display_grid(preds[i].swapaxes(0, 2), gridsize=(3, 3), titles=list(classes.keys())[1:])
+del model, preds, i
+'''
 
 # Initialises generator
 train_generator = data_generator(images_train, labels_train, n_files=2, batch_size=64,  target_class=None)
@@ -211,23 +238,24 @@ valid_generator = data_generator(images_valid, labels_valid, n_files=4, batch_si
 test_generator  = data_generator(images_test,  labels_test,  n_files=4, batch_size=256, target_class=None)
 
 # Initialises model
-model = final_model(input_shape=(256, 256, 3), n_outputs=len(classes))
+model = model_final(input_shape=(256, 256, 3), n_outputs=len(classes))
 model.summary()
 
-# Transfers latest final model parameters
+''' Transfers latest final model parameters
 params = search_data(paths['models'], pattern='final\.h5$')
 params = params[np.argmax([os.stat(file).st_birthtime for file in params])]
 params = models.load_model(params).get_weights()
 model.set_weights(params)
 del params
+'''
 
 # Computes class weights
 alphas = np.zeros((len(classes),), dtype=int)
-for label in search_data(paths['labels'], pattern=training):
+for label in train_generator.label_files:
     freqs = read_raster(label, dtype=int)
     freqs = np.bincount(freqs.flatten(), minlength=len(classes))
     alphas += freqs
-alphas = 1 / np.sqrt(alphas)
+alphas = np.sqrt(alphas)**-1
 alphas = alphas / np.sum(alphas)
 del freqs, label
 
@@ -258,6 +286,8 @@ model = search_data(paths['models'], pattern=f'{model}\.h5$')
 model = model[np.argmax([os.stat(file).st_birthtime for file in model])]
 model = models.load_model(model)
 
+model = probas_model(input_shape=(256, 256, 3))
+
 ''' Computes test error
 performance = model.evaluate(test_generator, steps=len(test_generator.label_files) // test_generator.n_files)
 print('Test loss: {:.4f}\nTest accuracy: {:.4f}'.format(*performance))
@@ -268,6 +298,10 @@ del performance
 batch  = random.choice(len(test_generator.label_files) // test_generator.n_files)
 images, labels = test_generator.__getitem__(batch)
 probas = model.predict(images)
+
+for i in random.choice(range(len(images)), 2, replace=False):
+    display(images[i])
+    display_grid(probas[i].swapaxes(0, 2), gridsize=(3, 3), titles=classes.keys())
 
 # Formats labels and predictions
 if probas.shape[-1] > 1:

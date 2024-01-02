@@ -19,10 +19,11 @@ import numpy as np
 import os
 
 from landuse1860_utilities import *
-from skimage import color, exposure
+from scipy import ndimage
+from skimage import color, exposure, segmentation
 
 # Utilities
-classes = dict(zip(['undefined', 'buildings', 'transports', 'crops', 'meadows', 'pastures', 'specialised', 'forests', 'water'], np.arange(9)))
+classes = dict(zip(['undefined', 'buildings', 'transports', 'crops', 'meadows', 'pastures', 'specialised', 'forests', 'water', 'border'], np.arange(10)))
 
 #%% COMPUTES LABELS
 
@@ -31,10 +32,12 @@ def compute_label(srcfile:str, dstfile:str) -> None:
         return
     print(f'Processing: {filename(srcfile)}')
     y_landuse   = rasterise(landuse,   profile=srcfile, varname='y')
+    y_border    = rasterise(border,    profile=srcfile, varname='y')
     y_river     = rasterise(river,     profile=srcfile, varname='y')
     y_transport = rasterise(transport, profile=srcfile, varname='y')
     y_building  = rasterise(building,  profile=srcfile, varname='y')
     label = np.copy(y_landuse)
+    label = np.where(y_border    !=0, y_border,    label)
     label = np.where(y_river     !=0, y_river,     label)
     label = np.where(y_transport !=0, y_transport, label)
     label = np.where(y_building  !=0, y_building,  label)
@@ -47,6 +50,10 @@ classes = classes.sort_values(by=['y', 'cartoem_id'])
 # Loads landuse vectors
 landuse = gpd.read_file(f"{paths['vectors']}/cartoem/ocs_ancien_sans_bati.gpkg")[['THEME', 'geometry']]
 landuse = landuse.merge(classes, how='left', left_on='THEME', right_on='cartoem_id')[['y', 'geometry']]
+
+# Loads administrative boundaries
+border = gpd.read_file(f"{paths['vectors']}/cartoem/limite_administrative.gpkg").geometry
+border = gpd.GeoDataFrame({'y':9, 'geometry':border})
 
 # Loads river vectors
 river = gpd.read_file(f"{paths['vectors']}/cartoem/troncon_de_cours_d_eau.gpkg").geometry
@@ -86,6 +93,15 @@ for srcfile in srcfiles:
 
 del srcfiles, srcfile, label
 
+#! Temporary
+srcfiles = search_data(paths['labels'], 'label_.*.tif$')
+for srcfile in srcfiles:
+    print(f'Processing: {filename(srcfile)}')
+    y_border = rasterise(border, profile=srcfile, varname='y')
+    label = read_raster(srcfile)
+    label = np.where(np.logical_and(y_border != 0, np.isin(label, np.arange(3,8))), y_border, label)
+    write_raster(label, srcfile, srcfile)
+
 #%% COMPUTES MASKS
 
 def compute_mask(srcfile:str, dstfile:str) -> None:
@@ -121,3 +137,22 @@ dstfiles = [f"{paths['images']}/image_{filename(srcfile)}.tif" for srcfile in sr
 
 with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
     executor.map(preprocess_image, srcfiles, dstfiles)
+
+#%% PREPROCESS SEGMENTS
+
+segfiles = search_data(paths['segments'], 'seg_.*.tif$')
+mskfiles = search_data(paths['masks'], 'mask_.*.tif$')
+dstfiles = segfiles.copy()
+assert np.all(mapids(segfiles) == mapids(mskfiles))
+
+for segfile, mskfile, dstfile in zip(segfiles, mskfiles, dstfiles):
+    try:
+        print(f'Processing: {filename(segfile)}')
+        segment = read_raster(segfile)
+        mask    = read_raster(mskfile)
+        segment = segmentation.find_boundaries(segment, mode='thick')
+        segment = np.invert(segment)
+        segment = np.where(mask, segment, 0)
+        write_raster(segment, segfile, dstfile)
+    except Exception as error:
+        print(error)
