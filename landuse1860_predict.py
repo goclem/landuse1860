@@ -17,7 +17,7 @@ import pandas as pd
 import tensorflow
 
 from landuse1860_utilities import *
-from landuse1860_model import final_model
+from landuse1860_models import final_model
 from tensorflow.keras import layers, models, preprocessing
 
 # TensorFlow

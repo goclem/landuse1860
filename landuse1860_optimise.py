@@ -15,7 +15,7 @@ import tensorflow
 
 from matplotlib import colors, pyplot
 from numpy import random
-from landuse1860_model import unet_model, final_model
+from landuse1860_models import unet_model, final_model
 from landuse1860_utilities import *
 from tensorflow.keras import backend, callbacks, layers, losses, metrics, models, optimizers, utils
 
