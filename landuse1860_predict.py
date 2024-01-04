@@ -24,9 +24,6 @@ from tensorflow.keras import layers, models, preprocessing
 print('TensorFlow version:', tensorflow.__version__)
 print('GPU Available:', bool(len(tensorflow.config.experimental.list_physical_devices('GPU'))))
 
-# Utilities
-classes = dict(zip(['undefined', 'buildings', 'transports', 'crops', 'meadows', 'pastures', 'specialised', 'forests', 'water', 'border'], np.arange(10)))
-
 #%% COMPUTES PREDICTIONS
 
 def predict_probas(srcfile:str, n_outputs:int=10) -> np.ndarray:

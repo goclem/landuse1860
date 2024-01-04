@@ -10,7 +10,6 @@
 
 # Modules
 import geopandas as gpd
-import math
 import numpy as np
 import pandas as pd
 import os
@@ -18,15 +17,15 @@ import rasterio
 import re
 import shutil
 
-from rasterio import features, profiles, transform, windows
+from rasterio import features, profiles, transform
 from numpy import random
 from matplotlib import pyplot
 from os import path
 from tensorflow.keras import utils
 
 #%% CLASSES
-
-classes = dict(zip(['undefined', 'buildings', 'transports', 'crops', 'meadows', 'pastures', 'specialised', 'forests', 'water', 'border'], np.arange(10)))
+classes = ['undefined', 'buildings', 'transports', 'crops', 'meadows', 'pastures', 'specialised', 'forests', 'water', 'border']
+classes = dict(zip(classes, np.arange(10)))
 
 #%% PATHS UTILITIES
 
@@ -48,7 +47,7 @@ del home
 
 #%% FILE UTILITIES
 
-def search_data(directory:str='../data', pattern:str='.*') -> list:
+def search_data(directory:str, pattern:str='.*') -> list:
     '''Sorted list of files in a directory matching a regular expression'''
     files = list()
     for root, _, file_names in os.walk(directory):
@@ -75,7 +74,7 @@ def mapid(srcfile:str) -> str:
 
 mapids = np.vectorize(mapid)
 
-def filename(filepath:str, extension=False) -> str:
+def filename(filepath:str, extension:bool=False) -> str:
     '''Extracts file name'''
     filename = os.path.basename(filepath)
     if extension is False:
@@ -84,7 +83,7 @@ def filename(filepath:str, extension=False) -> str:
 
 filenames = np.vectorize(filename)
 
-def dirname(filepath:str, extension=False) -> str:
+def dirname(filepath:str, extension:bool=False) -> str:
     '''Extracts file name'''
     dirname = os.path.basename(os.path.dirname(filepath))
     return dirname
@@ -101,7 +100,7 @@ def sample_split(images:np.ndarray, sizes:dict, seed:int=0) -> list:
     samples = [images[indexes == sample, ...] for sample in samples]
     return samples
 
-def frequency(array):
+def frequency(array:np.ndarray) -> pd.Series:
     '''Computes the frequency of each value in an array'''
     values, counts = np.unique(array, return_counts=True)
     output = pd.Series(counts, name='counts', index=values)
