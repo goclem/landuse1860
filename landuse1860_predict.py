@@ -17,15 +17,19 @@ import pandas as pd
 import tensorflow
 
 from landuse1860_utilities import *
+from landuse1860_model import final_model
 from tensorflow.keras import layers, models, preprocessing
 
 # TensorFlow
 print('TensorFlow version:', tensorflow.__version__)
 print('GPU Available:', bool(len(tensorflow.config.experimental.list_physical_devices('GPU'))))
 
-#%% PREDICTS PROBABILITIES
+# Utilities
+classes = dict(zip(['undefined', 'buildings', 'transports', 'crops', 'meadows', 'pastures', 'specialised', 'forests', 'water', 'border'], np.arange(10)))
 
-def predict_probas(srcfile:str, n_outputs:int=9) -> np.ndarray:
+#%% COMPUTES PREDICTIONS
+
+def predict_probas(srcfile:str, n_outputs:int=10) -> np.ndarray:
     '''Computes moving window predictions for a map'''
     original = read_raster(srcfile) / 255
     shifted  = np.pad(original, ((128, 128), (128, 128), (0, 0)), mode='constant', constant_values=1)
@@ -41,16 +45,14 @@ def predict_probas(srcfile:str, n_outputs:int=9) -> np.ndarray:
     probas = np.mean(probas, axis=0)
     return probas
 
-# Loads model
-model = search_data(paths['models'], pattern='64_base\.h5$')
-model = model[np.argmax([os.stat(file).st_birthtime for file in model])]
-model = models.load_model(model)
+# Loads final model
+model = final_model(input_shape=(256, 256, 3), n_outputs=len(classes))
+model.load_weights(f"{paths['models']}/model32_final.ckpt")
 
 # Paths
-srcfiles = search_data(f"{paths['images']}", pattern='tif$')
+srcfiles = search_data(paths['images'], pattern='tif$')
 dstfiles = np.array([f"{paths['predictions']}/predict_{mapid(srcfile)}.tif" for srcfile in srcfiles])
 subset   = ~np.vectorize(path.exists)(dstfiles)
-subset   = np.char.find(srcfiles, '0560_6300') >= 0 # Testing
 
 # Computes probabilities
 for i, (srcfile, dstfile) in enumerate(zip(srcfiles[subset], dstfiles[subset])):
@@ -60,73 +62,50 @@ for i, (srcfile, dstfile) in enumerate(zip(srcfiles[subset], dstfiles[subset])):
     write_raster(np.squeeze(predict), srcfile, dstfile, nodata=None, dtype='uint8')
 del predict_probas, srcfiles, dstfiles, subset, i, srcfile, dstfile, predict
 
-#%% COMPUTES LABELS
+#%% POSTPROCESSES PREDICTIONS
 
-# Sets thresholds
-thresholds = dict(south=0.43, north=0.47, london=0.48)
-
-#! Set estimated threshold
-def compute_labels(srcfile:str, dstfile:str, threshold:float):
-    '''Computes labels from probabilities'''
+def postprocess(srcfile:str, dstfile:str) -> None:
+    '''Postprocesses predictions'''
     print(f'Processing: {mapid(srcfile)}')
-    os.system('gdal_calc.py --overwrite -A {srcfile} --outfile={dstfile} --calc="A>={threshold}" --type=Byte --quiet'.format(srcfile=srcfile, dstfile=dstfile + '.tif', threshold=threshold))
-    polygonise(dstfile + '.tif', dstfile + '.gpkg', cellvalue=1)
-    os.remove(dstfile + '.tif')
-    # Adds map identifier
-    predict = gpd.read_file(dstfile + '.gpkg').drop(columns=['value'])
-    predict['mapid'] = mapid(srcfile)
-    predict.to_file(dstfile + '.gpkg', driver='GPKG')
-    
+    predict = read_raster(srcfile)
+    predict = np.where(rasterise(france, profile=srcfile), predict, 0)
+    predict = np.where(rasterise(water, profile=srcfile), classes['water'], predict)
+    predict = np.where(rasterise(transports, profile=srcfile), classes['transports'], predict)
+    predict = np.where(rasterise(buildings, profile=srcfile), classes['buildings'], predict)
+    write_raster(predict, srcfile, dstfile, dtype='uint8')
+
+# Loads country mask
+france = gpd.read_file(f"{paths['vectors']}/france.gpkg")
+france = france.to_crs(2154)
+
+# Loads building vectors
+buildings  = pd.concat((
+    gpd.read_file(f"{paths['vectors']}/fixes/buildings1860_paris.gpkg")[['geometry']], 
+    gpd.read_file(f"{paths['vectors']}/fixes/buildings1860_fixes.gpkg")
+))
+
+# Loads transports vectors
+transports = pd.concat((
+    gpd.read_file(f"{paths['vectors']}/fixes/roads1860.gpkg"),
+    gpd.read_file(f"{paths['vectors']}/fixes/rails1860.gpkg")
+))
+transports.geometry = transports.geometry.buffer(4)
+
+# Loads water vectors
+rivers = gpd.read_file(f"{paths['vectors']}/fixes/rivers1860.gpkg")[['geometry']]
+canals = gpd.read_file(f"{paths['vectors']}/fixes/canals1860.gpkg")
+canals.geometry = canals.geometry.buffer(4)
+water = pd.concat((rivers, canals))
+del rivers, canals
+
 # Paths
-srcfiles = search_data(f"{paths['temporary']}/data_{region}", pattern='proba\.tif$')
-dstfiles = np.array([f"{paths['temporary']}/data_{region}/{mapid(srcfile)}_predict" for srcfile in srcfiles])
-subset   = ~np.vectorize(path.exists)(np.char.add(dstfiles, '.gpkg'))
+srcfiles = search_data(paths['predictions'], pattern='tif$')
+dstfiles = np.array([f"{paths['desktop']}/postprocessed/predict_{mapid(srcfile)}.tif" for srcfile in srcfiles])
+subset   = ~np.vectorize(path.exists)(dstfiles)
 
-# Computes labels
-with future.ThreadPoolExecutor(max_workers=4) as executor:
-    executor.map(compute_labels, srcfiles[subset], dstfiles[subset], itertools.repeat(thresholds[region]))
-del compute_labels, srcfiles, subset, executor
+# Postprocesses predictions
+with future.ThreadPoolExecutor(max_workers=8) as executor:
+    executor.map(postprocess, srcfiles[subset], dstfiles[subset])
+del postprocess, france, buildings, transports, water, srcfiles, dstfiles, subset
 
-#%% AGGREGATES LABELS
-
-# Works despite error message
-os.system('ogrmerge.py -single -overwrite_ds -f GPKG -nln {outlayer} -o {outfile} {pattern}'.format(outlayer=f'predictions_{region}', outfile=f"{paths[region]}/predictions_{region}.gpkg", pattern=f"{paths['temporary']}/data_{region}/*.gpkg"))
-# [os.remove(dstfile + '.gpkg') for dstfile in dstfiles]
-del dstfiles
-
-#%% FIXES PREDICTIONS #! Run carefully
-
-# Removes buildings from areas not properly exluded by the RAs
-predict = gpd.read_file(f"{paths['north']}/predictions_north.gpkg")
-masks   = gpd.read_file(f"{paths['vectors']}/extents_north.gpkg")
-masks   = masks.dissolve('mapid').reset_index()
-
-fixed = list()
-for mapid in predict.mapid.unique():
-    print(f'Processing: {mapid}')
-    mask   = masks[masks.mapid==mapid]
-    subset = predict[predict.mapid==mapid]
-    index  = np.array([mask.intersects(point) for point in subset.centroid]).flatten()
-    fixed.append(subset[~index])
-
-pd.concat(fixed).to_file(f"{paths['north']}/predictions_north.gpkg", driver='GPKG')
-    
-# Manages the overlap between the map collections
-predict = gpd.read_file(f"{paths['south']}/predictions_south.gpkg")
-pattern = '|'.join(mapids(search_data(paths['north'], pattern='image.tif'))) + '|london'
-masks = gpd.read_file(f"{paths['vectors']}/intersections.gpkg")
-masks = masks[np.array([len(re.findall(pattern, mapids)) == 1 for mapids in masks.mapids])]
-masks['mapid'] = masks.mapids.str.replace('_.*$', '')
-del pattern
-
-fixed = list()
-for mapid in predict.mapid.unique():
-    print(f'Processing: {mapid}')
-    subset = predict[predict.mapid==mapid]
-    index  = np.zeros(len(subset), dtype=bool)
-    mask   = masks[masks.mapid==mapid].dissolve(by='mapid')
-    if len(mask) > 0: 
-        index = np.array([mask.intersects(point) for point in subset.centroid]).flatten()
-    fixed.append(subset[~index])
-
-pd.concat(fixed).to_file(f"{paths['south']}/predictions_south.gpkg", driver='GPKG')
+#%% AGGREGATES PREDICTIONS

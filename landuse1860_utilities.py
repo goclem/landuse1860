@@ -24,6 +24,10 @@ from matplotlib import pyplot
 from os import path
 from tensorflow.keras import utils
 
+#%% CLASSES
+
+classes = dict(zip(['undefined', 'buildings', 'transports', 'crops', 'meadows', 'pastures', 'specialised', 'forests', 'water', 'border'], np.arange(10)))
+
 #%% PATHS UTILITIES
 
 home  = path.expanduser('~')

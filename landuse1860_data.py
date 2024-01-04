@@ -9,18 +9,14 @@
 #%% HEADER
 
 # Packages
-import argparse
 import concurrent.futures
-import functools
 import geopandas as gpd
 import cv2
-import pandas as pd
 import numpy as np
 import os
 
 from landuse1860_utilities import *
-from scipy import ndimage
-from skimage import color, exposure, segmentation
+from skimage import color, exposure
 
 # Utilities
 classes = dict(zip(['undefined', 'buildings', 'transports', 'crops', 'meadows', 'pastures', 'specialised', 'forests', 'water', 'border'], np.arange(10)))
@@ -93,35 +89,6 @@ for srcfile in srcfiles:
 
 del srcfiles, srcfile, label
 
-#! Temporary
-srcfiles = search_data(paths['labels'], 'label_.*.tif$')
-for srcfile in srcfiles:
-    print(f'Processing: {filename(srcfile)}')
-    y_border = rasterise(border, profile=srcfile, varname='y')
-    label = read_raster(srcfile)
-    label = np.where(np.logical_and(y_border != 0, np.isin(label, np.arange(3,8))), y_border, label)
-    write_raster(label, srcfile, srcfile)
-
-#%% COMPUTES MASKS
-
-def compute_mask(srcfile:str, dstfile:str) -> None:
-    if os.path.exists(dstfile):
-        return
-    print(f'Processing: {filename(srcfile)}')
-    mask = rasterise(france, profile=srcfile)
-    write_raster(mask, srcfile, dstfile)
-
-# Loads vectors in memory
-france = gpd.read_file(f"{paths['vectors']}/france.gpkg")
-france = france.buffer(200)
-
-# Computes masks
-srcfiles = search_data(paths['images'], 'image_.*.tif')
-dstfiles = [f"{paths['masks']}/mask_{filename(srcfile)}.tif" for srcfile in srcfiles]
-
-with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-    executor.map(compute_mask, tiles)
-
 #%% PREPROCESSES IMAGES
 
 def preprocess_image(srcfile, dstfile):
@@ -137,22 +104,3 @@ dstfiles = [f"{paths['images']}/image_{filename(srcfile)}.tif" for srcfile in sr
 
 with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
     executor.map(preprocess_image, srcfiles, dstfiles)
-
-#%% PREPROCESS SEGMENTS
-
-segfiles = search_data(paths['segments'], 'seg_.*.tif$')
-mskfiles = search_data(paths['masks'], 'mask_.*.tif$')
-dstfiles = segfiles.copy()
-assert np.all(mapids(segfiles) == mapids(mskfiles))
-
-for segfile, mskfile, dstfile in zip(segfiles, mskfiles, dstfiles):
-    try:
-        print(f'Processing: {filename(segfile)}')
-        segment = read_raster(segfile)
-        mask    = read_raster(mskfile)
-        segment = segmentation.find_boundaries(segment, mode='thick')
-        segment = np.invert(segment)
-        segment = np.where(mask, segment, 0)
-        write_raster(segment, segfile, dstfile)
-    except Exception as error:
-        print(error)

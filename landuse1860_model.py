@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 '''
-@description: Model structure for the Ordnance project
+@description: Models for the Landuse project
 @author: Clement Gorin
-@contact: gorinclem@gmail.com
-@version: 2023.05.26
+@contact: clement.gorin@univ-paris1.fr
 '''
 
-# Modules
+#%% HEADER
+
+# Packages
+import numpy as np
 from tensorflow.keras import callbacks, layers, initializers, models, utils
-from datetime import datetime
+from landuse1860_utilities import classes
+
+#%% UNET MODEL
 
 # Convolution block
 def convolution_block(input, filters:int, dropout:float, training:bool, name:str):
@@ -55,4 +59,26 @@ def unet_model(input_shape:dict, n_outputs:int, filters:int, output_activation:s
     outputs = layers.Conv2D(filters=n_outputs, kernel_size=(1, 1), padding='same', activation=output_activation, name='output')(d4)
     # Model
     model = models.Model(inputs=inputs, outputs=outputs, name=f"unet{filters}_{label}")
+    return model
+
+#%% FINAL MODEL
+
+def init_probas(input_shape:dict):
+    target_models = [models.load_model(f'../data_scem/models/unet32_{target}.h5') for target in list(classes.keys())[1:]]
+    inputs  = layers.Input(input_shape, name='input')
+    probas  = [model(inputs) for model in target_models]
+    outputs = layers.concatenate(probas, axis=3, name='concatenate')
+    model   = models.Model(inputs=inputs, outputs=outputs, name='model32_probas')
+    return model
+
+def final_model(input_shape:dict, n_outputs:int):
+    model_probas = init_probas(input_shape)
+    model_probas.trainable = False
+    inputs  = layers.Input(input_shape, name='input')
+    probas  = model_probas(inputs)
+    probas  = layers.Conv2D(filters=32, kernel_size=(3, 3), padding='same', activation='relu', name='conv1')(probas)
+    probas  = layers.Conv2D(filters=32, kernel_size=(3, 3), padding='same', activation='relu', name='conv2')(probas)
+    probas  = layers.Conv2D(filters=32, kernel_size=(3, 3), padding='same', activation='relu', name='conv3')(probas)
+    outputs = layers.Conv2D(filters=n_outputs, kernel_size=(1, 1), padding='same', activation='softmax', name='output')(probas)
+    model   = models.Model(inputs=inputs, outputs=outputs, name='model32_final')
     return model
