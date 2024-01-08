@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import tensorflow
 
+from scipy import ndimage
 from landuse1860_utilities import *
 from landuse1860_models import final_model
 from tensorflow.keras import layers, models, preprocessing
@@ -61,19 +62,10 @@ del predict_probas, srcfiles, dstfiles, subset, i, srcfile, dstfile, predict
 
 #%% POSTPROCESSES PREDICTIONS
 
-def postprocess(srcfile:str, dstfile:str) -> None:
-    '''Postprocesses predictions'''
-    print(f'Processing: {mapid(srcfile)}')
-    predict = read_raster(srcfile)
-    predict = np.where(rasterise(france, profile=srcfile), predict, 0)
-    predict = np.where(rasterise(water, profile=srcfile), classes['water'], predict)
-    predict = np.where(rasterise(transports, profile=srcfile), classes['transports'], predict)
-    predict = np.where(rasterise(buildings, profile=srcfile), classes['buildings'], predict)
-    write_raster(predict, srcfile, dstfile, dtype='uint8')
-
 # Loads country mask
 france = gpd.read_file(f"{paths['vectors']}/france.gpkg")
 france = france.to_crs(2154)
+france.geometry = france.geometry.buffer(100)
 
 # Loads building vectors
 buildings  = pd.concat((
@@ -100,8 +92,29 @@ srcfiles = search_data(paths['predictions'], pattern='tif$')
 dstfiles = np.array([f"{paths['desktop']}/postprocessed/predict_{mapid(srcfile)}.tif" for srcfile in srcfiles])
 subset   = ~np.vectorize(path.exists)(dstfiles)
 
+''' #? Testing
+srcfile = '../data_scem/predictions/predict_0140_6840.tif'
+dstfile = '/Users/goclem/Desktop/postprocessed/predict_0140_6840.tif'
+'''
+
+def postprocess(srcfile:str, dstfile:str) -> None:
+    '''Postprocesses predictions'''
+    print(f'Processing: {mapid(srcfile)}')
+    predict = read_raster(srcfile)
+    # Fills undefined and borders
+    mask    = rasterise(france, profile=srcfile)
+    filling = np.logical_and(np.isin(predict, [0, 9]), ~mask)
+    filling = ndimage.distance_transform_edt(filling, return_distances=False, return_indices=True)
+    predict = predict[tuple(filling)]
+    # Adds fixes
+    predict = np.where(mask, predict, 0)
+    predict = np.where(rasterise(water, profile=srcfile), classes['water'], predict)
+    predict = np.where(rasterise(transports, profile=srcfile), classes['transports'], predict)
+    predict = np.where(rasterise(buildings, profile=srcfile), classes['buildings'], predict)
+    write_raster(predict, srcfile, dstfile, dtype='uint8')
+
 # Postprocesses predictions
-with future.ThreadPoolExecutor(max_workers=8) as executor:
+with future.ThreadPoolExecutor(max_workers=4) as executor:
     executor.map(postprocess, srcfiles[subset], dstfiles[subset])
 del postprocess, france, buildings, transports, water, srcfiles, dstfiles, subset
 

@@ -35,11 +35,12 @@ paths = dict(
     images='../data_scem/images',
     labels='../data_scem/labels',
     masks='../data_scem/masks',
-    segments='../data_scem/segments',
     predictions='../data_scem/predictions',
+    postprocessed='../data_scem/postprocessed',
     models='../data_scem/models',
     vectors='../data_scem/vectors',
     utilities='../data_scem/utilities',
+    statistics='../data_scem/statistics',
     desktop=f'{home}/Desktop',
     temporary=f'{home}/Desktop/temporary'
 )
