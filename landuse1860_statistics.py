@@ -78,28 +78,14 @@ with future.ThreadPoolExecutor(max_workers=6) as executor:
 
 confmats = functools.reduce(lambda cm1, cm2: cm1.add(cm2, fill_value=0), confmats)
 
-# Computes statistics
-targets    = ['buildings', 'crops', 'meadows', 'pastures', 'specialised', 'forests', 'water']
-statistics = [compute_statistics(confmats, target) for target in targets]
-statistics = pd.DataFrame(statistics).set_index('target')
-statistics_rf  = statistics.round(2).copy()
-statistics_cnn = statistics.round(2).copy()
-statistics_rf_nb.to_csv(f"{paths['statistics']}/statistics_rf_nb.csv")
-statistics_cnn.to_csv(f"{paths['statistics']}/statistics_cnn.csv")
-
-    
-
-
-accuracy = np.divide(np.sum(np.diag(confmats)), np.sum(confmats.values))
-
 # Generic
 print(f'Accuracy: {accuracy:.04f}')
 
-# True
+# Confusion matrix - True
 print('Read as rows:\nAmong the pixels of [true], [value]% are predicted as [predicted]')
 stat = confmats.divide(confmats.sum(axis=1), axis=0)
 
-# Predicted
+# Confusion matrix - Predicted
 print('Read as columns:\nAmong the pixels predicted as [predicted], [value]% are in fact [true]')
 stat = confmats.divide(confmats.sum(axis=0), axis=1)
 
@@ -107,3 +93,10 @@ stat.loc['Total', :] = stat.sum(axis=0)
 stat.loc[:, 'Total'] = stat.sum(axis=1)
 stat = stat.applymap(lambda value: '{0:.1f} %'.format(value * 100))
 print(stat)
+
+# Class- wise precision recall
+targets    = ['buildings', 'crops', 'meadows', 'pastures', 'specialised', 'forests', 'water']
+statistics = [compute_statistics(confmats, target) for target in targets]
+statistics = pd.DataFrame(statistics).set_index('target')
+statistics_rf  = statistics.round(2).copy()
+statistics_cnn = statistics.round(2).copy()
